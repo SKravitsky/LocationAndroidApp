@@ -4,15 +4,22 @@ import android.Manifest;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.location.Location;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.widget.DrawerLayout;
+import android.support.v7.app.ActionBarDrawerToggle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.view.MenuItem;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -27,8 +34,16 @@ import com.google.android.gms.location.GeofencingRequest;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.model.LatLng;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+
+import static com.forestoden.locationservices.Constants.LOCATIONS;
+import static com.forestoden.locationservices.Constants.stationUrlObject;
 
 public class MainActivity extends AppCompatActivity implements
         ConnectionCallbacks, OnConnectionFailedListener,
@@ -52,25 +67,136 @@ public class MainActivity extends AppCompatActivity implements
 
     private Button mAddGeofencesButton;
 
+    //Navigation Drawer Variables
+    private String[] mDrawerOptions;
+    private DrawerLayout mDrawerLayout;
+    private ListView mDrawerList;
+    private ActionBarDrawerToggle mDrawerToggle;
+    private String mActivityTitle;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        mDrawerOptions = getResources().getStringArray(R.array.nav_options);
+        mDrawerLayout = (DrawerLayout) findViewById(R.id.drawer_layout);
+        mDrawerList = (ListView) findViewById(R.id.left_drawer);
+
+        mActivityTitle = getTitle().toString();
+
+        //Set adapter to the drawer options
+        mDrawerList.setAdapter(new ArrayAdapter<String>(this,
+                R.layout.drawer_list_item, mDrawerOptions));
+
+        //Set click listener to get menu selection
+        mDrawerList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> adapterView, View view, int pos, long id) {
+                Toast.makeText(MainActivity.this, "Not implemented yet!", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        //Hamburger Menu
+        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        getSupportActionBar().setHomeButtonEnabled(true);
+        setupDrawer();
+
         mLatitudeText = (TextView) findViewById(R.id.latitude_text);
         mLongitudeText = (TextView) findViewById(R.id.longitude_text);
-
         mGeofenceList = new ArrayList<Geofence>();
-
         mGeofenceList = new ArrayList<>();
 
-        createGeofenceList();
+        try {
+            createGeofenceList();
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
         createGoogleApiClient();
     }
 
+    private void setupDrawer() {
+        mDrawerToggle = new ActionBarDrawerToggle(this, mDrawerLayout,
+                R.string.navigation_drawer_open,
+                R.string.navigation_drawer_close) {
+            /** Called when drawer has been fully opened */
+            public void onDrawerOpened(View drawerView) {
+                super.onDrawerOpened(drawerView);
+                getSupportActionBar().setTitle("Navigation Drawer");
+                invalidateOptionsMenu();
+            }
 
+            /** Called when drawer has been fully closed */
+            public void onDrawerClosed(View view) {
+                super.onDrawerClosed(view);
+                getSupportActionBar().setTitle(mActivityTitle);
+                invalidateOptionsMenu();
+            }
+        };
 
-    protected synchronized void createGeofenceList(){
+        mDrawerToggle.setDrawerIndicatorEnabled(true);
+        mDrawerLayout.addDrawerListener(mDrawerToggle);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+
+        if(id == R.id.action_settings) {
+            return true;
+        }
+
+        if(mDrawerToggle.onOptionsItemSelected(item)) {
+            return true;
+        }
+
+        return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onPostCreate(Bundle savedInstanceState) {
+        super.onPostCreate(savedInstanceState);
+        mDrawerToggle.syncState();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        mDrawerToggle.onConfigurationChanged(newConfig);
+    }
+
+    protected void createGeofenceList() throws JSONException {
+        /* TODO: Ask user for Internet permission at run time */
+
+        GetStationsTask stationConnection = new GetStationsTask();
+        String stations = null;
+        try {
+            stations = stationConnection.execute(stationUrlObject).get();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+
+        if(stations != null){
+            JSONArray stationJson;
+
+            try {
+                stationJson = new JSONArray(stations);
+            } catch (Throwable t) {
+                Log.e(TAG, "Could not parse malformed JSON: " + stations);
+                return;
+            }
+
+            for(int i = 0; i < stationJson.length(); i++){
+                JSONObject station = stationJson.getJSONObject(i);
+                String name = (String) station.get("name");
+                double latitude = Double.parseDouble((String)station.get("latitude"));
+                double longitude = Double.parseDouble((String)station.get("longitude"));
+                LOCATIONS.put(name, new LatLng(latitude, longitude));
+            }
+        }
+
         for(Map.Entry<String, LatLng> entry : Constants.LOCATIONS.entrySet()) {
             mGeofenceList.add(new Geofence.Builder()
                     .setRequestId(entry.getKey())
@@ -114,7 +240,7 @@ public class MainActivity extends AppCompatActivity implements
         Intent intent = new Intent(this, GeofenceTransitionsIntentService.class);
         return PendingIntent.getService(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
-    
+
     public void onResult(Status status) {
         if(status.isSuccess()) {
             Toast.makeText(this, "Geofences Added", Toast.LENGTH_SHORT).show();
@@ -123,7 +249,6 @@ public class MainActivity extends AppCompatActivity implements
                     status.getStatusCode());
         }
     }
-    
 
     @Override
     protected void onStart() {
@@ -138,7 +263,7 @@ public class MainActivity extends AppCompatActivity implements
             mGoogleApiClient.disconnect();
         }
     }
-    
+
     protected synchronized void createGoogleApiClient(){
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addConnectionCallbacks(this)
